@@ -1,0 +1,4 @@
+Case,GDP,Unemployment,Youth %,Internet %,Polity,Prev Events,Risk Score,Prediction
+1,5000,15.0,35.0,40.0,-5,1,0.5672753407526908,High Risk
+2,40000,4.0,18.0,85.0,8,0,0.6785952942285561,High Risk
+3,11372,3.7,24.8,89.6,8,0,0.7015788078454165,High Risk

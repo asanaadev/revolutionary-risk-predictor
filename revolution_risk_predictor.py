@@ -11,6 +11,8 @@ from sklearn.metrics import average_precision_score, roc_auc_score, brier_score_
 import joblib
 import matplotlib.pyplot as plt
 import seaborn as sns
+import warnings
+warnings.filterwarnings('ignore')
 
 # Try to import XGBoost; fall back if not installed
 try:
@@ -24,7 +26,18 @@ DATA_DIR = "data"
 os.makedirs(MODEL_DIR, exist_ok=True)
 os.makedirs(DATA_DIR, exist_ok=True)
 
-st.set_page_config(page_title="Revolution Risk Predictor", layout="wide")
+# Set page config
+st.set_page_config(
+    page_title="Revolution Risk Predictor",
+    page_icon="🌍",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Set style for plots
+plt.style.use('default')
+sns.set_palette("viridis")
+
 st.title("🌍 Revolution Risk Predictor - Country Analysis")
 
 st.markdown(
@@ -147,6 +160,29 @@ def generate_synthetic_data():
 
 
 @st.cache_data
+def preprocess_data(df, normalize=True):
+    """Preprocess data according to the Jupyter notebook specifications"""
+    # Create a copy of the dataframe
+    df_processed = df.copy()
+
+    # Handle missing values (if any)
+    df_processed = df_processed.dropna()
+
+    # Normalize data if requested
+    if normalize:
+        scaler = StandardScaler()
+        numeric_cols = df_processed.select_dtypes(
+            include=[np.number]).columns.tolist()
+        if 'label' in numeric_cols:
+            numeric_cols.remove('label')  # Don't scale the target variable
+
+        df_processed[numeric_cols] = scaler.fit_transform(
+            df_processed[numeric_cols])
+
+    return df_processed
+
+
+@st.cache_data
 def prepare_features(df):
     feature_cols = ["log_gdp", "unemployment", "youth_pct",
                     "internet_pct", "polity", "prev_events"]
@@ -245,14 +281,120 @@ def evaluate_model(model, scaler, X_test, y_test, model_name="model"):
     return metrics, probs, preds
 
 
+def create_enhanced_visualizations(df, target_col='label'):
+    """Create enhanced visualizations for the dataset"""
+    fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+
+    # Distribution of target variable - FIXED
+    target_counts = df[target_col].value_counts()
+
+    # Handle case where we might have more than 2 classes
+    if len(target_counts) == 2:
+        labels = ['No Revolution', 'Revolution']
+    else:
+        # Create labels for however many classes we have
+        labels = [f'Class {i}' for i in range(len(target_counts))]
+
+    axes[0, 0].pie(target_counts.values, labels=labels,
+                   autopct='%1.1f%%', startangle=90)
+    axes[0, 0].set_title('Distribution of Revolution Events')
+
+    # Correlation heatmap
+    numeric_cols = df.select_dtypes(include=[np.number]).columns
+    corr_matrix = df[numeric_cols].corr()
+    sns.heatmap(corr_matrix, annot=True, fmt=".2f", cmap='coolwarm',
+                center=0, ax=axes[0, 1])
+    axes[0, 1].set_title('Feature Correlation Matrix')
+
+    # Feature distributions - Moved selectbox outside of function
+    # This needs to be handled differently since selectbox creates UI elements
+    # Let's use the first numeric feature that's not the target
+    numeric_features = [col for col in df.select_dtypes(include=[np.number]).columns
+                        if col != target_col]
+    feature_to_plot = numeric_features[0] if numeric_features else df.columns[0]
+
+    sns.histplot(df[feature_to_plot], kde=True, ax=axes[1, 0])
+    axes[1, 0].set_title(f'Distribution of {feature_to_plot}')
+
+    # Boxplot of feature by target - only if we have the target column
+    if target_col in df.columns:
+        sns.boxplot(x=target_col, y=feature_to_plot, data=df, ax=axes[1, 1])
+        axes[1, 1].set_title(f'{feature_to_plot} by Revolution Status')
+
+        # Set appropriate x-axis labels based on number of classes
+        if len(target_counts) == 2:
+            axes[1, 1].set_xticklabels(['No Revolution', 'Revolution'])
+        else:
+            axes[1, 1].set_xticklabels(
+                [f'Class {i}' for i in range(len(target_counts))])
+    else:
+        # If no target column, show a different visualization
+        sns.boxplot(y=feature_to_plot, data=df, ax=axes[1, 1])
+        axes[1, 1].set_title(f'Distribution of {feature_to_plot}')
+
+    plt.tight_layout()
+    return fig, feature_to_plot
+
+
+def create_model_comparison_dashboard(metrics_logreg, metrics_strong, model_name):
+    """Create a comprehensive model comparison dashboard"""
+    st.subheader("📋 Model Comparison Dashboard")
+
+    # Create comparison dataframe
+    compare_df = pd.DataFrame({
+        'Metric': list(metrics_logreg.keys()),
+        'Logistic Regression': list(metrics_logreg.values()),
+        model_name: list(metrics_strong.values())
+    }).set_index('Metric')
+
+    # Display metrics in columns
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.metric("PR-AUC (LogReg)", f"{metrics_logreg['PR-AUC']:.3f}",
+                  delta=f"{(metrics_strong['PR-AUC'] - metrics_logreg['PR-AUC']):.3f}",
+                  delta_color="inverse")
+    with col2:
+        st.metric("F1-Score (LogReg)", f"{metrics_logreg['F1']:.3f}",
+                  delta=f"{(metrics_strong['F1'] - metrics_logreg['F1']):.3f}",
+                  delta_color="inverse")
+    with col3:
+        st.metric("Accuracy (LogReg)", f"{metrics_logreg['Accuracy']:.3f}",
+                  delta=f"{(metrics_strong['Accuracy'] - metrics_logreg['Accuracy']):.3f}",
+                  delta_color="inverse")
+
+    # Detailed comparison chart
+    fig, ax = plt.subplots(figsize=(10, 6))
+    compare_df.T.plot(kind='bar', ax=ax)
+    ax.set_title('Model Performance Comparison')
+    ax.set_ylabel('Score')
+    ax.legend(title='Metric', bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.xticks(rotation=45)
+    st.pyplot(fig)
+
+    return compare_df
+
+
 # ====== Streamlit App Main Code ======
 with st.spinner("Loading country data..."):
     df = load_data()
 
+# Sidebar for controls
 st.sidebar.header("Control Panel")
 retrain = st.sidebar.button("Retrain Models")
 threshold = st.sidebar.slider(
     "Alert Threshold", min_value=0.0, max_value=1.0, value=0.3, step=0.01)
+
+# Data preprocessing options
+st.sidebar.header("Data Preprocessing")
+normalize_data = st.sidebar.checkbox("Normalize Features", value=True)
+show_correlations = st.sidebar.checkbox("Show Correlation Matrix", value=True)
+
+# Visualization settings
+st.sidebar.header("Visualization Settings")
+plot_style = st.sidebar.selectbox("Select Plot Style",
+                                  ["default", "ggplot", "fivethirtyeight"])
+plt.style.use(plot_style)
 
 # Data overview
 st.subheader("📊 Dataset Overview")
@@ -268,6 +410,77 @@ with col3:
 # Show data sample
 if st.checkbox("Show Data Sample"):
     st.dataframe(df.head(10))
+
+# Enhanced Data Exploration
+st.header("📊 Enhanced Data Exploration")
+
+
+numeric_features = [col for col in df.select_dtypes(include=[np.number]).columns
+                    if col != 'label']
+selected_feature = st.selectbox(
+    "Select feature to visualize", numeric_features)
+
+if st.checkbox("Show Enhanced Visualizations"):
+    # Create a modified version that uses the selected feature
+    fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+
+    # Distribution of target variable
+    target_counts = df['label'].value_counts()
+
+    # Handle case where we might have more than 2 classes
+    if len(target_counts) == 2:
+        labels = ['No Revolution', 'Revolution']
+    else:
+        # Create labels for however many classes we have
+        labels = [f'Class {i}' for i in range(len(target_counts))]
+
+    axes[0, 0].pie(target_counts.values, labels=labels,
+                   autopct='%1.1f%%', startangle=90)
+    axes[0, 0].set_title('Distribution of Revolution Events')
+
+    # Correlation heatmap
+    numeric_cols = df.select_dtypes(include=[np.number]).columns
+    corr_matrix = df[numeric_cols].corr()
+    sns.heatmap(corr_matrix, annot=True, fmt=".2f", cmap='coolwarm',
+                center=0, ax=axes[0, 1])
+    axes[0, 1].set_title('Feature Correlation Matrix')
+
+    # Feature distribution for selected feature
+    sns.histplot(df[selected_feature], kde=True, ax=axes[1, 0])
+    axes[1, 0].set_title(f'Distribution of {selected_feature}')
+
+    # Boxplot of selected feature by target
+    sns.boxplot(x='label', y=selected_feature, data=df, ax=axes[1, 1])
+    axes[1, 1].set_title(f'{selected_feature} by Revolution Status')
+
+    # Set appropriate x-axis labels
+    if len(target_counts) == 2:
+        axes[1, 1].set_xticklabels(['No Revolution', 'Revolution'])
+    else:
+        axes[1, 1].set_xticklabels(
+            [f'Class {i}' for i in range(len(target_counts))])
+
+    plt.tight_layout()
+    st.pyplot(fig)
+
+
+# Data Preprocessing
+st.header("🔧 Data Preprocessing")
+st.write("This section shows the data preprocessing steps from your Jupyter notebook")
+
+# Preprocess the data
+df_processed = preprocess_data(df, normalize=normalize_data)
+
+if st.checkbox("Show Processed Data"):
+    st.dataframe(df_processed.head(10))
+
+    col1, col2 = st.columns(2)
+    with col1:
+        st.write("Original Data Statistics")
+        st.dataframe(df.describe())
+    with col2:
+        st.write("Processed Data Statistics")
+        st.dataframe(df_processed.describe())
 
 # Split data: use the last 12 months as test to simulate time-split
 latest_date = df["date"].max()
@@ -312,27 +525,10 @@ metrics_logreg, probs_logreg, preds_logreg = evaluate_model(
 metrics_strong, probs_strong, preds_strong = evaluate_model(
     strong_model, scaler, X_test, y_test, "Strong Model")
 
-st.subheader("📈 Model Performance Evaluation")
-st.write("Performance on test set (last 12 months):")
-
-col1, col2 = st.columns(2)
-with col1:
-    st.write("**Logistic Regression**")
-    st.dataframe(pd.DataFrame([metrics_logreg]).round(3))
-with col2:
-    model_name = "XGBoost" if XGBOOST_AVAILABLE else "RandomForest"
-    st.write(f"**{model_name}**")
-    st.dataframe(pd.DataFrame([metrics_strong]).round(3))
-
-# Model comparison chart
-st.subheader("Model Comparison")
-compare_df = pd.DataFrame({
-    'Metric': list(metrics_logreg.keys()),
-    'Logistic Regression': list(metrics_logreg.values()),
-    model_name: list(metrics_strong.values())
-}).set_index('Metric')
-
-st.bar_chart(compare_df.T)
+# Model comparison dashboard
+model_name = "XGBoost" if XGBOOST_AVAILABLE else "RandomForest"
+comparison_df = create_model_comparison_dashboard(
+    metrics_logreg, metrics_strong, model_name)
 
 # Prepare latest-month predictions for all countries
 latest_mask = df["date"] == df["date"].max()
