@@ -7,9 +7,10 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import average_precision_score, roc_auc_score, brier_score_loss, f1_score
+from sklearn.metrics import average_precision_score, roc_auc_score, brier_score_loss, f1_score, classification_report
 import joblib
 import matplotlib.pyplot as plt
+import seaborn as sns
 
 # Try to import XGBoost; fall back if not installed
 try:
@@ -19,14 +20,18 @@ except Exception:
     XGBOOST_AVAILABLE = False
 
 MODEL_DIR = "models"
+DATA_DIR = "data"
 os.makedirs(MODEL_DIR, exist_ok=True)
+os.makedirs(DATA_DIR, exist_ok=True)
 
 st.set_page_config(page_title="Revolution Risk Predictor", layout="wide")
-st.title("Revolution Risk Predictor — Country Analysis")
+st.title("🌍 Revolution Risk Predictor - Country Analysis")
 
 st.markdown(
     """
-    This tool predicts the risk of revolutionary events in countries based on socioeconomic and political indicators.
+    This machine learning solution predicts the risk of revolutionary events in countries 
+    based on socioeconomic and political indicators. The model supports decision-making for 
+    policymakers, NGOs, and international organizations.
     
     **Features used:**
     - GDP per capita (log transformed)
@@ -35,46 +40,46 @@ st.markdown(
     - Internet penetration rate
     - Polity score (democracy/autocracy scale)
     - Previous revolutionary events
-    
-    Use the sidebar to adjust the alert threshold or test custom inputs.
     """
 )
 
 
 @st.cache_data
-def load_real_data():
-    """Load real-world country data with synthetic revolutionary event labels"""
-    # Real country data with some realistic values
+def load_data():
+    """Load country data from CSV or generate synthetic data if not available"""
+    data_path = os.path.join(DATA_DIR, "revolution_risk_data.csv")
+
+    if os.path.exists(data_path):
+        df = pd.read_csv(data_path)
+        df['date'] = pd.to_datetime(df['date'])
+        return df
+    else:
+        st.info("Using synthetic data for demonstration. For real analysis, please add your dataset to the data folder.")
+        return generate_synthetic_data()
+
+
+def generate_synthetic_data():
+    """Generate synthetic country data with revolutionary event labels"""
     countries_data = {
         'country': ['France', 'Germany', 'UK', 'Italy', 'Spain', 'Poland',
                     'Ukraine', 'Turkey', 'Egypt', 'Tunisia', 'Brazil', 'Argentina',
                     'Mexico', 'USA', 'Canada', 'Australia', 'Tasmania', 'Japan',
                     'South Korea', 'China', 'India', 'Pakistan', 'Nigeria', 'South Africa',
-                    'Malaysia'],  # Added Malaysia
-
+                    'Malaysia', 'Thailand', 'Indonesia', 'Vietnam', 'Philippines', 'Myanmar'],
         'gdp': [41464, 48560, 42724, 34260, 29875, 17319, 3985, 9061, 3618, 3440,
                 6796, 10639, 9946, 65280, 46194, 51692, 45000, 40113, 31846, 10500,
-                # Malaysia GDP per capita (USD)
-                2100, 1193, 2028, 6040, 11372],
-
+                2100, 1193, 2028, 6040, 11372, 7274, 4294, 2823, 3595, 1263],
         'unemployment': [7.9, 3.0, 3.7, 9.7, 13.8, 3.4, 9.8, 10.6, 7.3, 15.2,
                          11.6, 8.5, 3.3, 3.7, 5.3, 5.1, 6.2, 2.4, 3.7, 4.8, 7.1,
-                         # Malaysia unemployment rate (%)
-                         6.3, 9.8, 28.5, 3.7],
-
+                         6.3, 9.8, 28.5, 3.7, 1.2, 6.3, 2.3, 5.1, 1.9],
         'youth_pct': [17.8, 15.1, 17.5, 15.1, 14.7, 18.3, 19.1, 25.6, 33.3, 29.4,
                       27.4, 24.9, 26.3, 19.0, 16.0, 19.0, 18.5, 14.5, 19.0, 17.2,
-                      # Malaysia youth population (%)
-                      27.0, 35.0, 42.5, 29.5, 24.8],
-
+                      27.0, 35.0, 42.5, 29.5, 24.8, 17.8, 27.3, 23.0, 31.9, 28.3],
         'internet_pct': [85.6, 89.7, 94.9, 74.5, 87.1, 82.9, 64.3, 71.0, 57.3, 66.3,
                          70.7, 79.9, 65.8, 87.3, 91.0, 88.2, 85.0, 93.0, 95.1, 61.2,
-                         # Malaysia internet penetration (%)
-                         45.0, 35.1, 42.0, 56.2, 89.6],
-
+                         45.0, 35.1, 42.0, 56.2, 89.6, 77.8, 73.7, 70.3, 60.1, 44.8],
         'polity': [8, 10, 10, 10, 8, 10, 7, -3, -3, 7, 8, 8, 8, 8, 10, 10, 10, 10,
-                   # Malaysia polity score (democracy scale)
-                   10, -7, 9, 5, 7, 9, 8]
+                   10, -7, 9, 5, 7, 9, 8, -2, 8, -7, 7, -2]
     }
 
     df_countries = pd.DataFrame(countries_data)
@@ -88,7 +93,6 @@ def load_real_data():
         base_values = country_row.to_dict()
 
         for i, d in enumerate(months):
-            # Add some realistic monthly variation
             row = base_values.copy()
             row['date'] = d
             row['year'] = d.year
@@ -122,7 +126,6 @@ def load_real_data():
             risk_score = risk_factors + np.random.normal(0, 0.5) + time_factor
 
             # Ensure we have a good mix of both classes in the training data
-            # Adjust threshold to get a reasonable balance (approx 20% positive class)
             row['label'] = 1 if risk_score > 5.5 else 0
 
             rows.append(row)
@@ -136,6 +139,9 @@ def load_real_data():
 
     # Create a log_gdp feature to stabilize scale
     df["log_gdp"] = np.log1p(df["gdp"])
+
+    # Save the synthetic data for future use
+    df.to_csv(os.path.join(DATA_DIR, "revolution_risk_data.csv"), index=False)
 
     return df
 
@@ -187,7 +193,7 @@ def train_models(X_train, y_train):
                               eval_metric="logloss", verbosity=0)
     else:
         model = RandomForestClassifier(
-            n_estimators=200, class_weight="balanced")
+            n_estimators=200, class_weight="balanced", random_state=42)
 
     model.fit(X_train, y_train)
     joblib.dump(model, os.path.join(MODEL_DIR, "strong_model.joblib"))
@@ -220,23 +226,48 @@ def evaluate_model(model, scaler, X_test, y_test, model_name="model"):
     preds = (probs >= 0.5).astype(int)
     f1 = f1_score(y_test, preds, zero_division=0)
 
+    # Additional metrics
+    report = classification_report(
+        y_test, preds, output_dict=True, zero_division=0)
+    accuracy = report['accuracy']
+    precision = report['weighted avg']['precision']
+    recall = report['weighted avg']['recall']
+
     metrics = {
         "PR-AUC": pr_auc,
         "ROC-AUC": roc_auc,
         "Brier": brier,
-        "F1@0.5": f1,
+        "F1": f1,
+        "Accuracy": accuracy,
+        "Precision": precision,
+        "Recall": recall
     }
-    return metrics, probs
+    return metrics, probs, preds
 
 
-# ====== Prepare data and train ======
+# ====== Streamlit App Main Code ======
 with st.spinner("Loading country data..."):
-    df = load_real_data()
+    df = load_data()
 
 st.sidebar.header("Control Panel")
 retrain = st.sidebar.button("Retrain Models")
 threshold = st.sidebar.slider(
     "Alert Threshold", min_value=0.0, max_value=1.0, value=0.3, step=0.01)
+
+# Data overview
+st.subheader("📊 Dataset Overview")
+col1, col2, col3 = st.columns(3)
+with col1:
+    st.metric("Total Records", len(df))
+with col2:
+    st.metric("Number of Countries", df['country'].nunique())
+with col3:
+    st.metric("Time Period",
+              f"{df['date'].min().strftime('%b %Y')} to {df['date'].max().strftime('%b %Y')}")
+
+# Show data sample
+if st.checkbox("Show Data Sample"):
+    st.dataframe(df.head(10))
 
 # Split data: use the last 12 months as test to simulate time-split
 latest_date = df["date"].max()
@@ -264,29 +295,44 @@ model_files_exist = (
 if retrain or not model_files_exist:
     with st.spinner("Training models..."):
         logreg, strong_model, scaler = train_models(X_train, y_train)
+        st.success("Models trained successfully!")
 else:
     try:
         logreg, scaler = joblib.load(os.path.join(MODEL_DIR, "logreg.joblib"))
         strong_model = joblib.load(os.path.join(
             MODEL_DIR, "strong_model.joblib"))
+        st.sidebar.success("Models loaded from cache")
     except:
         with st.spinner("Training models..."):
             logreg, strong_model, scaler = train_models(X_train, y_train)
 
 # Evaluate both models on test set
-metrics_logreg, probs_logreg = evaluate_model(
+metrics_logreg, probs_logreg, preds_logreg = evaluate_model(
     logreg, scaler, X_test, y_test, "Logistic Regression")
-metrics_strong, probs_strong = evaluate_model(
+metrics_strong, probs_strong, preds_strong = evaluate_model(
     strong_model, scaler, X_test, y_test, "Strong Model")
 
-st.subheader("Model Performance (Last 12 Months)")
+st.subheader("📈 Model Performance Evaluation")
+st.write("Performance on test set (last 12 months):")
+
 col1, col2 = st.columns(2)
 with col1:
     st.write("**Logistic Regression**")
-    st.dataframe(pd.DataFrame([metrics_logreg]))
+    st.dataframe(pd.DataFrame([metrics_logreg]).round(3))
 with col2:
-    st.write("**XGBoost**" if XGBOOST_AVAILABLE else "**RandomForest**")
-    st.dataframe(pd.DataFrame([metrics_strong]))
+    model_name = "XGBoost" if XGBOOST_AVAILABLE else "RandomForest"
+    st.write(f"**{model_name}**")
+    st.dataframe(pd.DataFrame([metrics_strong]).round(3))
+
+# Model comparison chart
+st.subheader("Model Comparison")
+compare_df = pd.DataFrame({
+    'Metric': list(metrics_logreg.keys()),
+    'Logistic Regression': list(metrics_logreg.values()),
+    model_name: list(metrics_strong.values())
+}).set_index('Metric')
+
+st.bar_chart(compare_df.T)
 
 # Prepare latest-month predictions for all countries
 latest_mask = df["date"] == df["date"].max()
@@ -311,16 +357,41 @@ out = df_latest[["country", "gdp", "unemployment", "youth_pct",
 out["risk_score"] = chosen_probs
 out["alert"] = (out["risk_score"] >= threshold).astype(int)
 
-st.subheader("Country Risk Assessment (Latest Month)")
+st.subheader("🌡️ Country Risk Assessment (Latest Month)")
 st.dataframe(out.sort_values(
     "risk_score", ascending=False).reset_index(drop=True))
+
+# Risk distribution visualization
+st.subheader("Risk Distribution")
+fig, ax = plt.subplots(1, 2, figsize=(12, 4))
+
+# Histogram of risk scores
+ax[0].hist(out["risk_score"], bins=20, edgecolor='black', alpha=0.7)
+ax[0].set_xlabel('Risk Score')
+ax[0].set_ylabel('Frequency')
+ax[0].set_title('Distribution of Risk Scores')
+ax[0].axvline(x=threshold, color='r', linestyle='--',
+              label=f'Threshold ({threshold})')
+ax[0].legend()
+
+# Count of alerts
+alert_counts = out["alert"].value_counts()
+ax[1].bar(['No Alert', 'Alert'], alert_counts.values,
+          color=['green', 'red'], alpha=0.7)
+ax[1].set_title('Number of Countries with Alerts')
+ax[1].set_ylabel('Count')
+
+for i, v in enumerate(alert_counts.values):
+    ax[1].text(i, v + 0.1, str(v), ha='center')
+
+st.pyplot(fig)
 
 csv = out.to_csv(index=False)
 st.download_button("Download Predictions CSV", csv,
                    file_name="country_risk_predictions.csv")
 
 # Feature importance
-st.subheader("Model Explanation")
+st.subheader("🔍 Model Explanation")
 exp_col1, exp_col2 = st.columns(2)
 with exp_col1:
     st.write("Logistic Regression Coefficients")
@@ -332,6 +403,7 @@ with exp_col1:
     ax.barh(coef_df["feature"], coef_df["coefficient"])
     ax.set_xlabel("Coefficient Value")
     ax.set_ylabel("Feature")
+    ax.axvline(x=0, color='black', linestyle='-', alpha=0.3)
     st.pyplot(fig)
 
 with exp_col2:
@@ -351,7 +423,7 @@ with exp_col2:
         st.error(f"Could not compute feature importances: {e}")
 
 # Custom input testing
-st.subheader("Test Custom Country Scenario")
+st.subheader("🧪 Test Custom Country Scenario")
 with st.form("custom_input"):
     st.write("Adjust features to test different scenarios:")
 
@@ -387,27 +459,36 @@ if submitted:
     st.metric("Predicted Revolution Risk", f"{prob:.3f}")
 
     if prob >= threshold:
-        st.error("High risk: Above alert threshold")
+        st.error("🚨 High risk: Above alert threshold")
+        st.write(
+            "**Recommendation:** Monitor the situation closely, consider preventive measures.")
     else:
-        st.success("Low risk: Below alert threshold")
+        st.success("✅ Low risk: Below alert threshold")
+        st.write("**Recommendation:** Continue regular monitoring.")
 
-# Data summary
-st.subheader("Dataset Overview")
-st.write(
-    f"Dataset contains {len(df)} country-month records for {df['country'].nunique()} countries")
-st.write("Time period:", df['date'].min().strftime(
-    "%Y-%m"), "to", df['date'].max().strftime("%Y-%m"))
+# Methodology and interpretation
+st.subheader("📋 Methodology")
+st.markdown("""
+This machine learning solution predicts the risk of revolutionary events using:
 
-st.markdown(
-    """
-    **Methodology:**
-    - Uses realistic country data with synthetic revolutionary event labels based on known risk factors
-    - Models trained on historical data and evaluated on the most recent 12 months
-    - Logistic Regression provides interpretable coefficients
-    - XGBoost/RandomForest provides stronger predictive performance
-    
-    **Interpretation:**
-    - Higher risk scores indicate greater probability of revolutionary events
-    - Countries with economic challenges, political instability, and youth bulges tend to have higher risk
-    """
-)
+1. **Data Collection**: Socioeconomic and political indicators from various countries
+2. **Feature Engineering**: Log transformation of GDP, lag features for previous events
+3. **Model Selection**: Comparison of Logistic Regression and XGBoost/RandomForest
+4. **Evaluation**: Multiple metrics including PR-AUC, ROC-AUC, F1-score, and Brier score
+5. **Interpretation**: Feature importance analysis to understand key risk factors
+
+**Key Risk Factors:**
+- Low GDP per capita
+- High unemployment rates
+- Large youth population
+- Low internet penetration
+- Autocratic governance (low polity score)
+- Previous revolutionary events
+""")
+
+# Footer
+st.markdown("---")
+st.markdown("""
+**Disclaimer**: This is a demonstration project for educational purposes. 
+Predictions are based on synthetic data and should not be used for real-world decision making.
+""")
