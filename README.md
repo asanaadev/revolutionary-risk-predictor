@@ -22,7 +22,7 @@
 
 ```bash
 # 1. Clone and setup
-git clone https://github.com/yourusername/revolution-risk-predictor.git
+git clone git@github.com:asanaadev/revolutionary-risk-predictor.git
 cd revolution-risk-predictor
 
 # 2. Install dependencies
@@ -79,7 +79,7 @@ F1-Score 0.78 0.83
 
 ## 🌐 Live Demo
 
-https://static.streamlit.io/badges/streamlit_badge_black_white.svg
+https://predictor4revolutionary.streamlit.app/
 
 Note: Demo uses synthetic data for demonstration purposes
 
