@@ -25,7 +25,7 @@
 git clone git@github.com:asanaadev/revolutionary-risk-predictor.git
 cd revolution-risk-predictor
 
-# 2. Install dependencies
+# 2. Install dependencies note: python-3.12 needed
 pip install -r requirements.txt
 
 # 3. Launch the app
